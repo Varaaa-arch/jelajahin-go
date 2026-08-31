@@ -13,11 +13,11 @@ import (
 )
 
 type FlightService struct {
-	repo *repositories.FlightRepository
+	repo repositories.FlightRepositoryInterface
 	redis *redis.Client
 }
 
-func NewFlightService(repo *repositories.FlightRepository, redis *redis.Client) *FlightService {
+func NewFlightService(repo repositories.FlightRepositoryInterface, redis *redis.Client) *FlightService {
 	return &FlightService{repo: repo, redis: redis}
 }
 

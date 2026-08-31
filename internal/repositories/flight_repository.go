@@ -5,6 +5,12 @@ import (
 	"gorm.io/gorm"
 )
 
+type FlightRepositoryInterface interface {
+	SearchFlights(origin, destination, departureData string) ([]models.Flight, error)
+	GetFlightByID(id string) (*models.Flight, error)
+	GetAvailableSeats(flightID string) ([]models.FlightSeat, error)
+}
+
 type FlightRepository struct {
 	db *gorm.DB 
 }
