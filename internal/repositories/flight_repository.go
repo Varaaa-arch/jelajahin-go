@@ -14,37 +14,36 @@ func NewFlightRepository(db *gorm.DB) *FlightRepository {
 }
 
 // Search filter dengan filter origin, destinasi, departure_data
-func (r *FlightRepository) SearchFlights(origin, destination, departureData string) ([]models.Flight, error){
+func (r *FlightRepository) SearchFlights(origin, destination, departureData string) ([]models.Flight, error) {
 	var flights []models.Flight
 	query := r.db
 
 	// Filt by status
-	query = query.Where("status = ?", "scheduled")
+	query = query.Where("flights.status = ?", "scheduled")
 
-	// Filt by origin airport
-	if origin != "" {
-		// Join dengan route table untuk cek origin_airport_id
-		query = query.Joins("JOIN routes ON flight.routes_id = routes.id").
-			Where("routes.origin_airport_id = ?", origin)
-	}
-
-	// Filt by destination airport 
-	if destination != "" {
-		// Join dengan route table untuk cek destination_airport_id
-		query = query.Joins("JOIN routes ON flight.routes_id = routes.id").
-			Where("routes.destination_airport_id = ?", destination)
+	// Filt by origin & destination airport (single join dengan routes)
+	if origin != "" || destination != "" {
+		query = query.Joins("JOIN routes ON flights.route_id = routes.id")
+		if origin != "" {
+			query = query.Joins("JOIN airports origin_airport ON origin_airport.id = routes.origin_airport_id").
+				Where("origin_airport.code = ?", origin)
+		}
+		if destination != "" {
+			query = query.Joins("JOIN airports dest_airport ON dest_airport.id = routes.destination_airport_id").
+				Where("dest_airport.code = ?", destination)
+		}
 	}
 
 	// Filt by departure_date
 	if departureData != "" {
-		query = query.Where("departure_date = ?", departureData)
+		query = query.Where("flights.departure_date = ?", departureData)
 	}
 
 	// Execute query
 	if err := query.Find(&flights).Error; err != nil {
 		return nil, err
 	}
-	
+
 	return flights, nil
 }
 

@@ -4,63 +4,94 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+	"github.com/Varaaa-arch/jelajahin-go/internal/repositories"
+	"github.com/Varaaa-arch/jelajahin-go/internal/services"
 	"gorm.io/gorm"
-	"github.com/Varaaa-arch/jelajahin-go/internal/models"
 )
 
 type FlightHandler struct {
-	db *gorm.DB
+	repo    *repositories.FlightRepository
+	service *services.FlightService
 }
 
-func NewFlightHandler(db *gorm.DB) *FlightHandler {
-	return &FlightHandler{db: db}
+func NewFlightHandler(repo *repositories.FlightRepository, service *services.FlightService) *FlightHandler {
+	return &FlightHandler{
+		repo:    repo,
+		service: service,
+	}
 }
 
+// SearchFlights endpoint: GET /api/v1/flights/search
+// Query params: origin, destination, departure_date
 func (h *FlightHandler) SearchFlights(c *gin.Context) {
 	origin := c.Query("origin")
 	destination := c.Query("destination")
 	departureDate := c.Query("departure_date")
 
-	var flights []models.Flight
-
-	query := h.db.
-		Joins("JOIN routes ON routes.id = flights.route_id").
-		Joins("JOIN airports origin_airport ON origin_airport.id = routes.origin_airport_id").
-		Joins("JOIN airports destination_airport ON destination_airport.id = routes.destination_airport_id").
-		Where("flights.status = ?", "scheduled")
-
-	if origin != "" {
-		query = query.Where("origin_airport.code = ?", origin)
-	}
-	if destination != "" {
-		query = query.Where("destination_airport.code = ?", destination)
-	}
-	if departureDate != "" {
-		query = query.Where("flights.departure_date = ?", departureDate)
-	}
-
-	if err := query.Find(&flights).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"status": "error", "error": "Failed to fetch flights"})
+	// Validate params (minimal validation)
+	if origin == "" || destination == "" || departureDate == "" {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "Missing required parameters: origin, destination, departure_date",
+		})
 		return
 	}
 
+	// Call service dengan caching
+	flights, err := h.service.SearchFlights(origin, destination, departureDate)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "Failed to search flights",
+		})
+		return
+	}
+
+	// Return response
 	c.JSON(http.StatusOK, gin.H{
-		"data":   flights,
-		"status": "success",
+		"data": flights,
+		"message": "Flights retrieved successfully",
+		"total": len(flights),
 	})
 }
 
+// GetFlightByID endpoint: GET /api/v1/flights/:id
 func (h *FlightHandler) GetFlightByID(c *gin.Context) {
 	id := c.Param("id")
 
-	var flight models.Flight
-	if err := h.db.First(&flight, "id = ?", id).Error; err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "Flight not found"})
+	flight, err := h.service.GetFlightByID(id)
+	if err != nil {
+		if err == gorm.ErrRecordNotFound {
+			c.JSON(http.StatusNotFound, gin.H{
+				"error": "Flight not found",
+			})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "Failed to fetch flight",
+		})
 		return
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"data":   flight,
-		"status": "success",
+		"data": flight,
+		"message": "Flight retrieved successfully",
+	})
+}
+
+// GetAvailableSeats endpoint: GET /api/v1/flights/:id/seats
+func (h *FlightHandler) GetAvailableSeats(c *gin.Context) {
+	flightID := c.Param("id")
+
+	seats, err := h.repo.GetAvailableSeats(flightID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "Failed to fetch available seats",
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"data": seats,
+		"total": len(seats),
+		"message": "Available seats retrieved successfully",
 	})
 }
