@@ -15,6 +15,10 @@ func SetupRoutes(router *gin.Engine, db *gorm.DB, redis *redis.Client) {
 	flightService := services.NewFlightService(flightRepo, redis)
 	flightHandler := handlers.NewFlightHandler(flightRepo, flightService)
 
+	// Initialize seat dependencies
+	seatService := services.NewSeatService(redis)
+	seatHandler := handlers.NewSeatHandler(seatService)
+
 	// API v1 routes
 	api := router.Group("/api/v1")
 	{
@@ -24,6 +28,15 @@ func SetupRoutes(router *gin.Engine, db *gorm.DB, redis *redis.Client) {
 			flights.GET("/search", flightHandler.SearchFlights)
 			flights.GET("/:id", flightHandler.GetFlightByID)
 			flights.GET("/:id/seats", flightHandler.GetAvailableSeats)
+		}
+
+		// Seat routes
+		seats := api.Group("/seats")
+		{
+			seats.POST("/lock", seatHandler.LockSeat)
+			seats.POST("/unlock", seatHandler.UnlockSeat)
+			seats.POST("/lock-multiple", seatHandler.LockMultipleSeats)
+			seats.GET("/:flight_id/:seat_id/lock-status", seatHandler.CheckSeatLock)
 		}
 	}
 }
