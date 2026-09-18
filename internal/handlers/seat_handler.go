@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"errors"
 	"net/http"
 	"time"
 
@@ -42,35 +43,38 @@ func (h *SeatHandler) LockSeat(c *gin.Context) {
 	// Validate request body
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{
-			"error": "Invalid request body",
+			"success": false,
+			"message": "Invalid request body",
+			"code":    http.StatusBadRequest,
 			"details": err.Error(),
 		})
 		return
 	}
 
 	// Try to lock seat
-	locked, lockedBy, err := h.seatService.LockSeat(req.FlightID, req.SeatID, req.UserID)
+	_, lockedBy, err := h.seatService.LockSeat(req.FlightID, req.SeatID, req.UserID)
 	if err != nil {
+		if errors.Is(err, services.ErrSeatAlreadyLocked) {
+			c.JSON(http.StatusConflict, gin.H{
+				"success":   false,
+				"message":   "Seat already locked",
+				"code":      http.StatusConflict,
+				"locked_by": lockedBy,
+			})
+			return
+		}
 		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": "Failed to lock seat",
+			"success": false,
+			"message": "Failed to lock seat",
+			"code":    http.StatusInternalServerError,
 			"details": err.Error(),
-		})
-		return
-	}
-
-	// If lock failed
-	if !locked {
-		c.JSON(http.StatusConflict, LockSeatResponse{
-			Success:   false,
-			Message:   "Seat already locked",
-			LockedBy:  lockedBy,
 		})
 		return
 	}
 
 	// Lock successful - generate lock token
 	lockToken := req.FlightID + ":" + req.SeatID + ":" + req.UserID
-	expiryTime := time.Now().Add(15 * time.Minute)
+	expiryTime := time.Now().Add(services.DefaultLockTTL)
 
 	c.JSON(http.StatusOK, LockSeatResponse{
 		Success:    true,
@@ -78,7 +82,7 @@ func (h *SeatHandler) LockSeat(c *gin.Context) {
 		LockToken:  lockToken,
 		LockedBy:   req.UserID,
 		ExpiryTime: expiryTime,
-		TTLSeconds: 900, // 15 minutes = 900 seconds
+		TTLSeconds: int64(services.DefaultLockTTL.Seconds()), // 15 minutes = 900 seconds
 	})
 }
 
@@ -93,15 +97,28 @@ func (h *SeatHandler) UnlockSeat(c *gin.Context) {
 
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{
-			"error": "Invalid request body",
+			"success": false,
+			"message": "Invalid request body",
+			"code":    http.StatusBadRequest,
 		})
 		return
 	}
 
 	err := h.seatService.UnlockSeat(req.FlightID, req.SeatID)
 	if err != nil {
+		if errors.Is(err, services.ErrSeatNotLocked) {
+			c.JSON(http.StatusNotFound, gin.H{
+				"success": false,
+				"message": "Seat is not locked",
+				"code":    http.StatusNotFound,
+			})
+			return
+		}
 		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": "Failed to unlock seat",
+			"success": false,
+			"message": "Failed to unlock seat",
+			"code":    http.StatusInternalServerError,
+			"details": err.Error(),
 		})
 		return
 	}
@@ -120,13 +137,17 @@ func (h *SeatHandler) CheckSeatLock(c *gin.Context) {
 	isLocked, lockedBy, err := h.seatService.CheckSeatLock(flightID, seatID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": "Failed to check seat lock",
+			"success": false,
+			"message": "Failed to check seat lock",
+			"code":    http.StatusInternalServerError,
+			"details": err.Error(),
 		})
 		return
 	}
 
 	if !isLocked {
 		c.JSON(http.StatusOK, gin.H{
+			"success":   true,
 			"is_locked": false,
 			"message":   "Seat is available",
 		})
@@ -137,9 +158,10 @@ func (h *SeatHandler) CheckSeatLock(c *gin.Context) {
 	ttl, _ := h.seatService.GetSeatLockTTL(flightID, seatID)
 
 	c.JSON(http.StatusOK, gin.H{
-		"is_locked": true,
-		"locked_by": lockedBy,
-		"ttl_seconds": ttl.Seconds(),
+		"success":    true,
+		"is_locked":  true,
+		"locked_by":  lockedBy,
+		"ttl_seconds": int64(ttl.Seconds()),
 	})
 }
 
@@ -155,35 +177,50 @@ func (h *SeatHandler) LockMultipleSeats(c *gin.Context) {
 
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{
-			"error": "Invalid request body",
+			"success": false,
+			"message": "Invalid request body",
+			"code":    http.StatusBadRequest,
 		})
 		return
 	}
 
 	locked, lockedSeats, err := h.seatService.LockMultipleSeats(req.FlightID, req.SeatIDs, req.UserID)
 	if err != nil {
+		if errors.Is(err, services.ErrSeatAlreadyLocked) {
+			c.JSON(http.StatusConflict, gin.H{
+				"success":     false,
+				"message":     "Some seats are already locked",
+				"code":        http.StatusConflict,
+				"failed_seats": lockedSeats,
+			})
+			return
+		}
 		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": "Failed to lock seats",
+			"success": false,
+			"message": "Failed to lock seats",
+			"code":    http.StatusInternalServerError,
+			"details": err.Error(),
 		})
 		return
 	}
 
 	if !locked {
 		c.JSON(http.StatusConflict, gin.H{
-			"success": false,
-			"message": "Some seats are already locked",
+			"success":     false,
+			"message":     "Some seats are already locked",
+			"code":        http.StatusConflict,
 			"failed_seats": lockedSeats,
 		})
 		return
 	}
 
-	expiryTime := time.Now().Add(15 * time.Minute)
+	expiryTime := time.Now().Add(services.DefaultLockTTL)
 
 	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"message": "Seats locked successfully",
+		"success":     true,
+		"message":     "Seats locked successfully",
 		"locked_seats": lockedSeats,
 		"expiry_time": expiryTime,
-		"ttl_seconds": 900,
+		"ttl_seconds": int64(services.DefaultLockTTL.Seconds()),
 	})
 }

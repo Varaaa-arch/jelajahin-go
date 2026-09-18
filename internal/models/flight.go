@@ -88,24 +88,30 @@ type SeatClass struct {
 }
 
 type AircraftSeat struct {
-	ID               string `gorm:"primaryKey;type:uuid" json:"id"`
-	AircraftTypeID   string `gorm:"type:uuid" json:"aircraft_type_id"`
-	SeatClassID      string `gorm:"type:uuid" json:"seat_class_id"`
-	SeatNumber       string `gorm:"type:varchar(10)" json:"seat_number"`
-	RowNumber        int    `json:"row_number"`
-	ColumnLetter     string `gorm:"type:varchar(1)" json:"column_letter"`
-	IsExitRow        bool   `gorm:"default:false" json:"is_exit_row"`
-	IsExtraLegroom   bool   `gorm:"default:false" json:"is_extra_legroom"`
+	ID               string    `gorm:"primaryKey;type:uuid" json:"id"`
+	AircraftTypeID   string    `gorm:"type:uuid" json:"aircraft_type_id"`
+	SeatClassID      string    `gorm:"type:uuid" json:"seat_class_id"`
+	SeatNumber       string    `gorm:"type:varchar(10)" json:"seat_number"`
+	RowNumber        int       `json:"row_number"`
+	ColumnLetter     string    `gorm:"type:varchar(1)" json:"column_letter"`
+	IsExitRow        bool      `gorm:"default:false" json:"is_exit_row"`
+	IsExtraLegroom   bool      `gorm:"default:false" json:"is_extra_legroom"`
 	CreatedAt        time.Time `json:"created_at"`
+
+	// Association
+	SeatClass *SeatClass `gorm:"foreignKey:SeatClassID" json:"seat_class,omitempty"`
 }
 
 type FlightSeat struct {
-	ID             string `gorm:"primaryKey;type:uuid" json:"id"`
-	FlightID       string `gorm:"type:uuid" json:"flight_id"`
-	AircraftSeatID string `gorm:"type:uuid" json:"aircraft_seat_id"`
-	CurrentPrice   float64 `gorm:"type:decimal(12,2)" json:"current_price"`
-	IsAvailable    bool   `gorm:"default:true" json:"is_available"`
-	BookingID      *string `gorm:"type:uuid" json:"booking_id"`
+	ID             string    `gorm:"primaryKey;type:uuid" json:"id"`
+	FlightID       string    `gorm:"type:uuid" json:"flight_id"`
+	AircraftSeatID string    `gorm:"type:uuid" json:"aircraft_seat_id"`
+	CurrentPrice   float64   `gorm:"type:decimal(12,2)" json:"current_price"`
+	IsAvailable    bool      `gorm:"default:true" json:"is_available"`
+	BookingID      *string   `gorm:"type:uuid" json:"booking_id"`
 	CreatedAt      time.Time `json:"created_at"`
 	UpdatedAt      time.Time `json:"updated_at"`
+
+	// Association — di-load via Preload("AircraftSeat")
+	AircraftSeat *AircraftSeat `gorm:"foreignKey:AircraftSeatID" json:"aircraft_seat,omitempty"`
 }

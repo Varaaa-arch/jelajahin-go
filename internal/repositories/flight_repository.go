@@ -63,11 +63,16 @@ func (r *FlightRepository) GetFlightByID(id string) (*models.Flight, error) {
 	return &flight, nil
 }
 
-// GetAvailableSeats untuk seat yang belum booked
-func (r *FlightRepository) GetAvailableSeats(flightID string) ([]models.FlightSeat, error){
+// GetAvailableSeats untuk seat yang belum booked, di-join dengan AircraftSeat
+// agar seat_number, row_number, column_letter tersedia untuk frontend.
+func (r *FlightRepository) GetAvailableSeats(flightID string) ([]models.FlightSeat, error) {
 	var seats []models.FlightSeat
 
-	if err := r.db.Where("flight_id = ? AND is_available = ?", flightID, true).Find(&seats).Error; err != nil {
+	if err := r.db.
+		Preload("AircraftSeat").
+		Preload("AircraftSeat.SeatClass").
+		Where("flight_id = ? AND is_available = ?", flightID, true).
+		Find(&seats).Error; err != nil {
 		return nil, err
 	}
 

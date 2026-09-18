@@ -1,6 +1,7 @@
 package services
 
 import (
+	"errors"
 	"testing"
 	"time"
 
@@ -15,8 +16,8 @@ func TestLockSeat(t *testing.T) {
 	defer client.Close()
 
 	service := NewSeatService(client)
-	flightID := "test-flight-1"
-	seatID := "12A"
+	flightID := "svc-flight-1"
+	seatID := "SVC-12A"
 	userID := "user-123"
 
 	// Test lock success
@@ -45,8 +46,8 @@ func TestLockSeatAlreadyLocked(t *testing.T) {
 	defer client.Close()
 
 	service := NewSeatService(client)
-	flightID := "test-flight-2"
-	seatID := "12B"
+	flightID := "svc-flight-2"
+	seatID := "SVC-12B"
 	userID1 := "user-123"
 	userID2 := "user-456"
 
@@ -56,8 +57,8 @@ func TestLockSeatAlreadyLocked(t *testing.T) {
 	// Try lock dengan user 2 (harus fail)
 	locked, lockedBy, err := service.LockSeat(flightID, seatID, userID2)
 
-	if err != nil {
-		t.Errorf("LockSeat should not error on already locked: %v", err)
+	if !errors.Is(err, ErrSeatAlreadyLocked) {
+		t.Errorf("Expected ErrSeatAlreadyLocked, got: %v", err)
 	}
 
 	if locked {
@@ -79,8 +80,8 @@ func TestCheckSeatLock(t *testing.T) {
 	defer client.Close()
 
 	service := NewSeatService(client)
-	flightID := "test-flight-3"
-	seatID := "12C"
+	flightID := "svc-flight-3"
+	seatID := "SVC-12C"
 	userID := "user-123"
 
 	// Lock seat
@@ -112,8 +113,8 @@ func TestGetSeatLockTTL(t *testing.T) {
 	defer client.Close()
 
 	service := NewSeatService(client)
-	flightID := "test-flight-4"
-	seatID := "12D"
+	flightID := "svc-flight-4"
+	seatID := "SVC-12D"
 	userID := "user-123"
 
 	// Lock seat
@@ -146,8 +147,8 @@ func TestLockMultipleSeats(t *testing.T) {
 	defer client.Close()
 
 	service := NewSeatService(client)
-	flightID := "test-flight-5"
-	seatIDs := []string{"12E", "12F", "12G"}
+	flightID := "svc-flight-5"
+	seatIDs := []string{"SVC-12E", "SVC-12F", "SVC-12G"}
 	userID := "user-123"
 
 	// Lock multiple seats

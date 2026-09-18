@@ -34,6 +34,7 @@ func main() {
 
 	// Middleware
 	router.Use(middleware.CorsMiddleware())
+	router.Use(middleware.RequestLoggerMiddleware())
 
 	// Health check
 	router.GET("/health", func(c *gin.Context) {
