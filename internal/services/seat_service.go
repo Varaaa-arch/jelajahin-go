@@ -16,7 +16,15 @@ var (
 	ErrSeatAlreadyLocked = errors.New("seat already locked")
 	// ErrSeatNotLocked dikembalikan saat mencoba unlock/check kursi yang tidak dikunci.
 	ErrSeatNotLocked = errors.New("seat is not locked")
+	// ErrNotLockOwner dikembalikan saat user bukan pemilik lock.
+	ErrNotLockOwner = errors.New("not the lock owner")
+	// ErrSeatAlreadyBooked dikembalikan saat kursi sudah dikonfirmasi/booked.
+	ErrSeatAlreadyBooked = errors.New("seat already booked")
 )
+
+// BookedSeatTTL durasi tanda kursi sudah terpakai (1 tahun).
+// Kursi booked disimpan terpisah dari lock supaya tidak teroverwrite.
+const BookedSeatTTL = 365 * 24 * time.Hour
 
 // DefaultLockTTL durasi default lock kursi.
 const DefaultLockTTL = 15 * time.Minute
@@ -67,19 +75,28 @@ func (s *SeatService) LockSeat(flightID, seatID, userID string) (bool, string, e
 }
 
 // UnlockSeat menghapus lock (manual unlock).
-// Mengembalikan ErrSeatNotLocked saat kursi sebenarnya tidak dikunci.
-func (s *SeatService) UnlockSeat(flightID, seatID string) error {
+// Hanya pemilik lock (userID yang sama) yang diizinkan.
+// Mengembalikan ErrSeatNotLocked saat kursi sebenarnya tidak dikunci,
+// dan ErrNotLockOwner saat userID bukan pemilik lock.
+func (s *SeatService) UnlockSeat(flightID, seatID, userID string) error {
 	ctx := context.Background()
 
 	lockKey := fmt.Sprintf("lock:seat:%s:%s", flightID, seatID)
 
-	exists, err := s.redis.Exists(ctx, lockKey).Result()
+	// Ambil siapa pemilik lock
+	lockedBy, err := s.redis.Get(ctx, lockKey).Result()
 	if err != nil {
+		if err == redis.Nil {
+			return ErrSeatNotLocked
+		}
 		log.Printf("Error checking seat before unlock: %v\n", err)
 		return err
 	}
-	if exists == 0 {
-		return ErrSeatNotLocked
+
+	// Validasi kepemilikan
+	if lockedBy != userID {
+		log.Printf("Unlock rejected: seat %s locked by %s, requested by %s\n", seatID, lockedBy, userID)
+		return ErrNotLockOwner
 	}
 
 	err = s.redis.Del(ctx, lockKey).Err()
@@ -88,7 +105,7 @@ func (s *SeatService) UnlockSeat(flightID, seatID string) error {
 		return err
 	}
 
-	log.Printf("Seat %s unlocked\n", seatID)
+	log.Printf("Seat %s unlocked by owner %s\n", seatID, userID)
 	return nil
 }
 
@@ -152,10 +169,10 @@ func (s *SeatService) LockMultipleSeats(flightID string, seatIDs []string, userI
 		}
 	}
 
-	// If any seat failed to lock, unlock all yang berhasil
+	// If any seat failed to lock, unlock all yang berhasil (internal rollback, bypass ownership check)
 	if len(failedSeats) > 0 {
 		for _, seatID := range lockedSeats {
-			s.UnlockSeat(flightID, seatID)
+			s.forceUnlockSeat(flightID, seatID)
 		}
 		log.Printf("Failed to lock some seats: %v\n", failedSeats)
 		return false, failedSeats, ErrSeatAlreadyLocked
@@ -163,6 +180,71 @@ func (s *SeatService) LockMultipleSeats(flightID string, seatIDs []string, userI
 
 	log.Printf("Successfully locked %d seats\n", len(lockedSeats))
 	return true, lockedSeats, nil
+}
+
+// forceUnlockSeat adalah helper internal yang menghapus lock tanpa validasi ownership.
+// Digunakan hanya untuk rollback saat LockMultipleSeats gagal sebagian.
+func (s *SeatService) forceUnlockSeat(flightID, seatID string) {
+	ctx := context.Background()
+	lockKey := fmt.Sprintf("lock:seat:%s:%s", flightID, seatID)
+	if err := s.redis.Del(ctx, lockKey).Err(); err != nil {
+		log.Printf("Rollback: error unlocking seat %s: %v\n", seatID, err)
+	}
+}
+
+// ConfirmSeat menandai kursi sebagai booked (setelah payment sukses).
+// Menghapus lock dan menyimpan booked key secara permanen (TTL 1 tahun).
+func (s *SeatService) ConfirmSeat(flightID, seatID, userID string) error {
+	ctx := context.Background()
+
+	lockKey := fmt.Sprintf("lock:seat:%s:%s", flightID, seatID)
+	bookedKey := fmt.Sprintf("booked:seat:%s:%s", flightID, seatID)
+
+	// Cek apakah sudah booked
+	alreadyBooked, err := s.redis.Exists(ctx, bookedKey).Result()
+	if err != nil {
+		return err
+	}
+	if alreadyBooked > 0 {
+		return ErrSeatAlreadyBooked
+	}
+
+	// Tandai sebagai booked (TTL panjang = 1 tahun)
+	if err := s.redis.Set(ctx, bookedKey, userID, BookedSeatTTL).Err(); err != nil {
+		log.Printf("Error confirming seat %s: %v\n", seatID, err)
+		return err
+	}
+
+	// Hapus lock (jika masih ada)
+	s.redis.Del(ctx, lockKey)
+
+	log.Printf("Seat %s (flight %s) confirmed/booked by user %s\n", seatID, flightID, userID)
+	return nil
+}
+
+// ConfirmMultipleSeats konfirmasi banyak kursi sekaligus.
+// Mengembalikan daftar kursi yang gagal dikonfirmasi.
+func (s *SeatService) ConfirmMultipleSeats(flightID string, seatIDs []string, userID string) ([]string, error) {
+	failed := []string{}
+
+	for _, seatID := range seatIDs {
+		if err := s.ConfirmSeat(flightID, seatID, userID); err != nil {
+			if err == ErrSeatAlreadyBooked {
+				log.Printf("Seat %s already booked, skipping\n", seatID)
+				// Already booked = idempotent, bukan error fatal
+				continue
+			}
+			log.Printf("Error confirming seat %s: %v\n", seatID, err)
+			failed = append(failed, seatID)
+		}
+	}
+
+	if len(failed) > 0 {
+		return failed, fmt.Errorf("failed to confirm %d seat(s): %v", len(failed), failed)
+	}
+
+	log.Printf("Successfully confirmed %d seats for flight %s\n", len(seatIDs), flightID)
+	return nil, nil
 }
 
 // watchLockExpiry menjalankan goroutine yang mencatat notifikasi saat lock

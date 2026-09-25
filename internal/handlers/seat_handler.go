@@ -90,6 +90,7 @@ func (h *SeatHandler) LockSeat(c *gin.Context) {
 type UnlockSeatRequest struct {
 	FlightID string `json:"flight_id" binding:"required"`
 	SeatID   string `json:"seat_id" binding:"required"`
+	UserID   string `json:"user_id" binding:"required"`
 }
 
 func (h *SeatHandler) UnlockSeat(c *gin.Context) {
@@ -98,19 +99,27 @@ func (h *SeatHandler) UnlockSeat(c *gin.Context) {
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"success": false,
-			"message": "Invalid request body",
+			"message": "Invalid request body: flight_id, seat_id, dan user_id wajib diisi",
 			"code":    http.StatusBadRequest,
 		})
 		return
 	}
 
-	err := h.seatService.UnlockSeat(req.FlightID, req.SeatID)
+	err := h.seatService.UnlockSeat(req.FlightID, req.SeatID, req.UserID)
 	if err != nil {
 		if errors.Is(err, services.ErrSeatNotLocked) {
 			c.JSON(http.StatusNotFound, gin.H{
 				"success": false,
 				"message": "Seat is not locked",
 				"code":    http.StatusNotFound,
+			})
+			return
+		}
+		if errors.Is(err, services.ErrNotLockOwner) {
+			c.JSON(http.StatusForbidden, gin.H{
+				"success": false,
+				"message": "You are not the owner of this lock",
+				"code":    http.StatusForbidden,
 			})
 			return
 		}
@@ -126,6 +135,49 @@ func (h *SeatHandler) UnlockSeat(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "Seat unlocked successfully",
+	})
+}
+
+// ConfirmSeatsRequest body untuk POST /api/v1/seats/confirm
+type ConfirmSeatsRequest struct {
+	FlightID string   `json:"flight_id" binding:"required"`
+	SeatIDs  []string `json:"seat_ids" binding:"required,min=1"`
+	UserID   string   `json:"user_id" binding:"required"`
+}
+
+// ConfirmSeats endpoint: POST /api/v1/seats/confirm
+// Dipanggil oleh Laravel setelah payment berhasil.
+// Menandai kursi sebagai booked di Redis dan menghapus lock.
+func (h *SeatHandler) ConfirmSeats(c *gin.Context) {
+	var req ConfirmSeatsRequest
+
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"message": "Invalid request body: flight_id, seat_ids, dan user_id wajib diisi",
+			"code":    http.StatusBadRequest,
+			"details": err.Error(),
+		})
+		return
+	}
+
+	failedSeats, err := h.seatService.ConfirmMultipleSeats(req.FlightID, req.SeatIDs, req.UserID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"success":      false,
+			"message":      "Some seats could not be confirmed",
+			"code":         http.StatusInternalServerError,
+			"failed_seats": failedSeats,
+			"details":      err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success":          true,
+		"message":          "Seats confirmed successfully",
+		"confirmed_seats":  req.SeatIDs,
+		"flight_id":        req.FlightID,
 	})
 }
 

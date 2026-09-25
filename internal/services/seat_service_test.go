@@ -36,7 +36,7 @@ func TestLockSeat(t *testing.T) {
 	}
 
 	// Cleanup
-	service.UnlockSeat(flightID, seatID)
+	service.UnlockSeat(flightID, seatID, userID)
 }
 
 func TestLockSeatAlreadyLocked(t *testing.T) {
@@ -70,7 +70,7 @@ func TestLockSeatAlreadyLocked(t *testing.T) {
 	}
 
 	// Cleanup
-	service.UnlockSeat(flightID, seatID)
+	service.UnlockSeat(flightID, seatID, userID1)
 }
 
 func TestCheckSeatLock(t *testing.T) {
@@ -103,7 +103,7 @@ func TestCheckSeatLock(t *testing.T) {
 	}
 
 	// Cleanup
-	service.UnlockSeat(flightID, seatID)
+	service.UnlockSeat(flightID, seatID, userID)
 }
 
 func TestGetSeatLockTTL(t *testing.T) {
@@ -137,7 +137,7 @@ func TestGetSeatLockTTL(t *testing.T) {
 	}
 
 	// Cleanup
-	service.UnlockSeat(flightID, seatID)
+	service.UnlockSeat(flightID, seatID, userID)
 }
 
 func TestLockMultipleSeats(t *testing.T) {
@@ -168,6 +168,6 @@ func TestLockMultipleSeats(t *testing.T) {
 
 	// Cleanup
 	for _, seatID := range seatIDs {
-		service.UnlockSeat(flightID, seatID)
+		service.UnlockSeat(flightID, seatID, userID)
 	}
 }

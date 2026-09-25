@@ -55,7 +55,7 @@ func TestLockSeatHandler(t *testing.T) {
 	}
 
 	// Cleanup
-	seatService.UnlockSeat("test-flight-1", "12A")
+	seatService.UnlockSeat("test-flight-1", "12A", "test-user-1")
 }
 
 func TestLockSeatAlreadyLockedHandler(t *testing.T) {
@@ -105,5 +105,5 @@ func TestLockSeatAlreadyLockedHandler(t *testing.T) {
 	}
 
 	// Cleanup
-	seatService.UnlockSeat("test-flight-2", "12B")
+	seatService.UnlockSeat("test-flight-2", "12B", "user-1")
 }
