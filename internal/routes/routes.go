@@ -5,6 +5,7 @@ import (
 	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
 	"github.com/Varaaa-arch/jelajahin-go/internal/handlers"
+	"github.com/Varaaa-arch/jelajahin-go/internal/middleware"
 	"github.com/Varaaa-arch/jelajahin-go/internal/repositories"
 	"github.com/Varaaa-arch/jelajahin-go/internal/services"
 )
@@ -30,8 +31,9 @@ func SetupRoutes(router *gin.Engine, db *gorm.DB, redis *redis.Client) {
 			flights.GET("/:id/seats", flightHandler.GetAvailableSeats)
 		}
 
-		// Seat routes
+		// Seat routes (protected)
 		seats := api.Group("/seats")
+		seats.Use(middleware.AuthMiddleware(db))
 		{
 			seats.POST("/lock", seatHandler.LockSeat)
 			seats.POST("/unlock", seatHandler.UnlockSeat)
