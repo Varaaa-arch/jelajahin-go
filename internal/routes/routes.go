@@ -38,6 +38,7 @@ func SetupRoutes(router *gin.Engine, db *gorm.DB, redis *redis.Client) {
 			seats.POST("/lock", seatHandler.LockSeat)
 			seats.POST("/unlock", seatHandler.UnlockSeat)
 			seats.POST("/lock-multiple", seatHandler.LockMultipleSeats)
+			seats.POST("/extend", seatHandler.ExtendSeatHold)
 			seats.POST("/confirm", seatHandler.ConfirmSeats)
 			seats.GET("/:flight_id/:seat_id/lock-status", seatHandler.CheckSeatLock)
 		}

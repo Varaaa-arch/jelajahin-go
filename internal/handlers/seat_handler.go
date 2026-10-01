@@ -146,7 +146,7 @@ type ConfirmSeatsRequest struct {
 }
 
 // ConfirmSeats endpoint: POST /api/v1/seats/confirm
-// Dipanggil oleh Laravel setelah payment berhasil.
+// Dipanggil oleh Laravel setelah ADMIN menyetujui booking (bukan setelah bayar).
 // Menandai kursi sebagai booked di Redis dan menghapus lock.
 func (h *SeatHandler) ConfirmSeats(c *gin.Context) {
 	var req ConfirmSeatsRequest
@@ -178,6 +178,59 @@ func (h *SeatHandler) ConfirmSeats(c *gin.Context) {
 		"message":          "Seats confirmed successfully",
 		"confirmed_seats":  req.SeatIDs,
 		"flight_id":        req.FlightID,
+	})
+}
+
+// ExtendSeatHoldRequest body untuk POST /api/v1/seats/extend
+// Dipanggil Laravel setelah payment sukses agar kursi tidak lepas
+// selama menunggu persetujuan admin (lock awal cuma 15 menit).
+type ExtendSeatHoldRequest struct {
+	FlightID   string   `json:"flight_id" binding:"required"`
+	SeatIDs    []string `json:"seat_ids" binding:"required,min=1"`
+	UserID     string   `json:"user_id" binding:"required"`
+	TTLSeconds int64    `json:"ttl_seconds"`
+}
+
+// ExtendSeatHold endpoint: POST /api/v1/seats/extend
+func (h *SeatHandler) ExtendSeatHold(c *gin.Context) {
+	var req ExtendSeatHoldRequest
+
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"message": "Invalid request body: flight_id, seat_ids, dan user_id wajib diisi",
+			"code":    http.StatusBadRequest,
+			"details": err.Error(),
+		})
+		return
+	}
+
+	ttl := time.Duration(req.TTLSeconds) * time.Second
+	if ttl <= 0 {
+		ttl = services.DefaultLockTTL
+	}
+	if ttl > services.MaxHoldTTL {
+		ttl = services.MaxHoldTTL
+	}
+
+	failedSeats, err := h.seatService.ExtendSeatLock(req.FlightID, req.SeatIDs, req.UserID, ttl)
+	if err != nil {
+		c.JSON(http.StatusConflict, gin.H{
+			"success":      false,
+			"message":      "Some seat holds could not be extended",
+			"code":         http.StatusConflict,
+			"failed_seats": failedSeats,
+			"details":      err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success":      true,
+		"message":      "Seat holds extended successfully",
+		"extended_seats": req.SeatIDs,
+		"flight_id":    req.FlightID,
+		"ttl_seconds":  int64(ttl.Seconds()),
 	})
 }
 

@@ -29,6 +29,9 @@ const BookedSeatTTL = 365 * 24 * time.Hour
 // DefaultLockTTL durasi default lock kursi.
 const DefaultLockTTL = 15 * time.Minute
 
+// MaxHoldTTL batas maksimal perpanjangan tahan kursi (48 jam).
+const MaxHoldTTL = 48 * time.Hour
+
 type SeatService struct {
 	redis *redis.Client
 }
@@ -244,6 +247,73 @@ func (s *SeatService) ConfirmMultipleSeats(flightID string, seatIDs []string, us
 	}
 
 	log.Printf("Successfully confirmed %d seats for flight %s\n", len(seatIDs), flightID)
+	return nil, nil
+}
+
+// ExtendSeatLock memperpanjang (atau mengunci ulang) kursi selama menunggu
+// persetujuan admin. Dipanggil Laravel setelah payment sukses.
+// - Kursi yang sudah booked: dilewati (idempoten).
+// - Lock milik user yang sama: TTL diperpanjang.
+// - Lock hilang/kedaluwarsa: dikunci ulang bila belum booked.
+// - Lock milik orang lain: gagal.
+func (s *SeatService) ExtendSeatLock(flightID string, seatIDs []string, userID string, ttl time.Duration) ([]string, error) {
+	if ttl <= 0 {
+		ttl = DefaultLockTTL
+	}
+	if ttl > MaxHoldTTL {
+		ttl = MaxHoldTTL
+	}
+
+	ctx := context.Background()
+	failed := []string{}
+
+	for _, seatID := range seatIDs {
+		lockKey := fmt.Sprintf("lock:seat:%s:%s", flightID, seatID)
+		bookedKey := fmt.Sprintf("booked:seat:%s:%s", flightID, seatID)
+
+		// Sudah booked permanen -> anggap sukses, tidak perlu hold.
+		booked, err := s.redis.Exists(ctx, bookedKey).Result()
+		if err != nil {
+			failed = append(failed, seatID)
+			continue
+		}
+		if booked > 0 {
+			continue
+		}
+
+		lockedBy, err := s.redis.Get(ctx, lockKey).Result()
+		if err != nil && err != redis.Nil {
+			failed = append(failed, seatID)
+			continue
+		}
+		if err == nil && lockedBy != userID {
+			failed = append(failed, seatID)
+			continue
+		}
+		if err == nil {
+			// Milik sendiri -> perpanjang TTL.
+			if ok, err := s.redis.Expire(ctx, lockKey, ttl).Result(); err != nil || !ok {
+				failed = append(failed, seatID)
+				continue
+			}
+			log.Printf("Seat %s (flight %s) hold extended for user %s (TTL: %s)\n", seatID, flightID, userID, ttl)
+			continue
+		}
+
+		// Lock hilang -> kunci ulang.
+		ok, err := s.redis.SetNX(ctx, lockKey, userID, ttl).Result()
+		if err != nil || !ok {
+			failed = append(failed, seatID)
+			continue
+		}
+		log.Printf("Seat %s (flight %s) re-locked for user %s (TTL: %s)\n", seatID, flightID, userID, ttl)
+		s.watchLockExpiry(flightID, seatID, userID)
+	}
+
+	if len(failed) > 0 {
+		return failed, fmt.Errorf("failed to extend %d seat(s): %v", len(failed), failed)
+	}
+
 	return nil, nil
 }
 
